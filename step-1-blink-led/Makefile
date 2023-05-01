@@ -22,3 +22,11 @@ flash: firmware.bin
 .PHONY: clean
 clean:
 	rm firmware.*
+
+.PHONY: debug-openocd
+debug-openocd:
+	openocd -f board/ek-tm4c123gxl.cfg
+
+.PHONY: debug-gdb
+debug-gdb:
+	arm-none-eabi-gdb -ex "target extended-remote :3333" firmware.elf
