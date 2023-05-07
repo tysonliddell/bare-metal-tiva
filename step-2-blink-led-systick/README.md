@@ -10,6 +10,8 @@ Generating timing measure in milliseconds can then be achieved as follows:
 3. The static value will then increment once per millisecond.
 
 ## Increasing clock accuracy with PIOSC
+*Update: As mentioned in the [uart exercise](/step-3-uart-debug-output/README.md), the system clock inaccuracies were caused by a misunderstanding of the data sheet. The system clock was actually running at 16 MHz during this exercise, not the assumed 12.5 Mhz.*
+
 The system clock (`SysClk`) was used as the clock source for the SysTick timer by setting the appropriate bit in the `STCTRL` register. When comparing the LED flashing once per second to a stopwatch, I found that this wasn't very accurate. Sometimes I observed 8-9 blinks in a 10 second window. Switching to the precision internal oscillator (`PIOSC`) as a clock source (i.e. zeroing the `CLK_SRC` bit in `STCTRL`) proved to be much more accurate.
 
 ## Misc
