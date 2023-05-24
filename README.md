@@ -12,3 +12,5 @@ To use the tools I am familiar with (make, gcc, etc.) to build and flash some si
 1. [Making the LED blink](./step-1-blink-led/README.md)
 2. [Improving timing with SysTick](./step-2-blink-led-systick/README.md)
 3. [Adding UART debug output](./step-3-uart-debug-output/README.md)
+4. [Sending `printf` to UART with IO retargeting](./step-4-printf-to-uart/README.md)
+5. [Analysing a composite video signal](./extra-analyse-composite-video/README.md)
