@@ -11,6 +11,7 @@ extern int _write(int fd, char *ptr, int len);
 char buffer[100];
 
 int main(void) {
+  setup_80mhz_pll_clock();
   systick_init();
   periodic_timer_init(0);
 

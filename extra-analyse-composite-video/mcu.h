@@ -6,8 +6,18 @@
 
 #define BIT(x) ((uint32_t)1 << (x))
 #define SYSTEM_CLOCK_FREQ_HZ_DEFAULT (16000000)
+#define SYSTEM_CLOCK_FREQ_HZ_MAX (80000000)
 #define PIOSC_FREQ_HZ (16000000)
 #define GPIO_UNLOCK_VALUE (0x4C4F434B)
+#define SYSTEM_CLOCK_FREQ_HZ SYSTEM_CLOCK_FREQ_HZ_MAX
+
+typedef struct {
+  volatile uint32_t DID0, DID1, RESERVED1[10], PBORCTL, RESERVED2[7], RIS, IMC,
+      MISC, RESC, RCC, RESERVED3[2], GPIOHBCTL, RCC2, RESERVED4[2], MOSCCTL,
+      RESERVED5[49], DSLPCLKCFG, RESERVED6[1], SYSPROP, PIOSCCAL, PIOSCSTAT,
+      RESERVED7[2], PLLFREQ0, PLLFREQ1, PLLSTAT, RESERVED8[573];
+} SYSCTLMem;
+#define SYSCTL ((SYSCTLMem *)0x400FE000)
 
 typedef struct {
   volatile uint32_t GPIODATA_MASKS[255], GPIODATA, GPIODIR, GPIOIS, GPIOIBE,
@@ -93,6 +103,53 @@ static inline void spin(volatile uint32_t count) {
     (void)0;
 }
 
+static inline void clear_bit(volatile uint32_t *address, uint8_t bit_num) {
+  *address &= ~(1u << bit_num);
+}
+
+static inline void set_bit(volatile uint32_t *address, uint8_t bit_num) {
+  *address |= 1u << bit_num;
+}
+
+static inline bool get_bit(volatile uint32_t *address, uint8_t bit_num) {
+  return *address & (1u << bit_num);
+}
+
+static inline void setup_80mhz_pll_clock(void) {
+  // bypass the PLL while configuring it
+  set_bit(&SYSCTL->RCC, 11);
+  set_bit(&SYSCTL->RCC2, 11);
+
+  // RCC1 setup
+  // set XTAL to encoding for 16.0 MHz external main oscillator crystal
+  SYSCTL->RCC &= ~(0x1Fu << 6);
+  SYSCTL->RCC |= (0x15 << 6);
+
+  set_bit(&SYSCTL->RCC, 22); // enable system clock divider (PLL requires this)
+
+  // RCC2 setup (must come after RCC1 setup)
+  set_bit(&SYSCTL->RCC2, 31); // use RCC2 (to access DIV400 and 80 MHz clock)
+
+  // set the oscillator source to MOSC encoding (0x0)
+  SYSCTL->RCC2 &= ~(0x3u << 4);
+
+  // power up the PLL by clearing the PWRDN bit
+  clear_bit(&SYSCTL->RCC2, 13);
+
+  set_bit(&SYSCTL->RCC2, 30); // use DIV400
+  SYSCTL->RCC2 &= ~(0x7Fu << 22);
+  SYSCTL->RCC2 |= (0x04 << 22); // divide 400 MHz PLL by 4+1 -> 80 MHz
+
+  // while (get_bit(&SYSCTL->PLLSTAT, 0) == 0) {
+  while (get_bit(&SYSCTL->RIS, 6) == 0) {
+    // wait for PLL to reconverge/lock
+    spin(1);
+  }
+
+  // enable the PLL by clearing the BYPASS bit
+  clear_bit(&SYSCTL->RCC2, 11);
+}
+
 static inline void gpio_set_mode(GPIOPin gpiopin, GPIOMode mode) {
   RCGC->RCGCGPIO |= 1 << gpiopin.port; // ensure clock is enabled for GPIO port
   spin(3);
@@ -113,12 +170,12 @@ static inline void gpio_set_pin(GPIOPin gpiopin, bool set) {
 }
 
 static inline void systick_init() {
-  uint32_t systick_freq = PIOSC_FREQ_HZ / 4;
+  uint32_t systick_freq = SYSTEM_CLOCK_FREQ_HZ;
   uint32_t ticks_per_ms = systick_freq / 1000 - 1;
   SYSTICK->STRELOAD = ticks_per_ms;
-  SYSTICK->STCURRENT = 0x01;         // clear the STCURRENT REGISTER
-  SYSTICK->STCTRL = BIT(0) | BIT(1); // enable systick, timer interrupt and use
-                                     // precision internal oscillator (PIOSC)
+  SYSTICK->STCURRENT = 0x01;                  // clear the STCURRENT REGISTER
+  SYSTICK->STCTRL = BIT(0) | BIT(1) | BIT(2); // enable systick, timer interrupt
+                                              // and use system clock
 }
 
 static inline bool timer_expired(uint32_t *expiry, uint32_t period_ms,
@@ -133,18 +190,6 @@ static inline bool timer_expired(uint32_t *expiry, uint32_t period_ms,
 
   *expiry = (now - *expiry) > period_ms ? now + period_ms : *expiry + period_ms;
   return true;
-}
-
-static inline void clear_bit(volatile uint32_t *address, uint8_t bit_num) {
-  *address &= ~(1U << bit_num);
-}
-
-static inline void set_bit(volatile uint32_t *address, uint8_t bit_num) {
-  *address |= 1U << bit_num;
-}
-
-static inline bool get_bit(volatile uint32_t *address, uint8_t bit_num) {
-  return *address & (1U << bit_num);
 }
 
 static inline void gpio_enable_af(GPIOPin gpiopin, uint8_t af) {
@@ -216,7 +261,7 @@ static inline void uart_init(uint8_t uart_num, uint32_t baud_rate) {
   gpio_enable_af(rx, uart_af);
   gpio_enable_af(tx, uart_af);
 
-  float brd = SYSTEM_CLOCK_FREQ_HZ_DEFAULT / (16.f * (float)baud_rate);
+  float brd = SYSTEM_CLOCK_FREQ_HZ / (16.f * (float)baud_rate);
   uint32_t brd_int = (uint32_t)brd;
   uint32_t brd_frac = (uint32_t)((brd - (float)brd_int) * 64.0f + 0.5f);
 
@@ -263,5 +308,5 @@ static inline void periodic_timer_init(uint8_t timer_num) {
 }
 
 static inline uint32_t get_timer_value(GPTMMem *timer) {
-  return timer->GPTMTAV;  // value of the free-running timer
+  return timer->GPTMTAV; // value of the free-running timer
 }
