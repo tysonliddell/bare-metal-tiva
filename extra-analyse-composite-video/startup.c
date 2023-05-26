@@ -14,9 +14,13 @@ __attribute__((naked, noreturn)) void _reset(void) {
     (void)0;
 }
 
-extern void SysTick_Handler(void); // defined in main.c
-extern void _estack(void); // defined in link.ld
+extern void SysTick_Handler(void);              // defined in main.c
+extern void comparator_count_low_handler(void); // defined in main.c
+extern void _estack(void);                      // defined in link.ld
 
 // 16 standard and 139 TM4C123GH6PM-specific interrupt handlers
 __attribute__((section(".vectors"))) void (*const tab[16 + 139])(void) = {
-    _estack, _reset, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, SysTick_Handler};
+    [0] = _estack,
+    [1] = _reset,
+    [15] = SysTick_Handler,
+    [41] = comparator_count_low_handler};

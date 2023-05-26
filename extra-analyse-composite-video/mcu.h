@@ -48,12 +48,28 @@ typedef struct {
 } RCGCMem;
 #define RCGC ((RCGCMem *)0x400FE600)
 
-typedef enum { GPIO_MODE_INPUT, GPIO_MODE_OUTPUT } GPIOMode;
+typedef enum {
+  GPIO_MODE_DIGITAL_INPUT,
+  GPIO_MODE_DIGITAL_OUTPUT,
+  GPIO_MODE_ANALOG_INPUT,
+  GPIO_MODE_ANALOG_OUTPUT,
+} GPIOMode;
 
 typedef struct {
   volatile uint32_t STCTRL, STRELOAD, STCURRENT;
 } SysTickMem;
 #define SYSTICK ((SysTickMem *)0xE000E010)
+
+typedef struct {
+  volatile uint32_t EN0, EN1, EN2, EN3, EN4, RESERVED1[27], DIS0, DIS1, DIS2,
+      DIS3, DIS4, RESERVED2[860];
+} NVICMem;
+#define NVIC ((NVICMem *)0xE000E100)
+
+typedef struct {
+  volatile uint32_t CPAC, RESERVED[106], FPCC, FPCA, FPDSC;
+} FPUMem;
+#define FPU ((FPUMem *)0xE000ED88)
 
 typedef struct {
   volatile uint32_t UARTDR, UARTRSR_UARTECR, RESERVED1[4], UARTFR, RESERVED2[1],
@@ -97,6 +113,13 @@ typedef struct {
 static GPTMMem *TIMERS[] = {
     TIMER0, TIMER1, TIMER2, TIMER3, TIMER4, TIMER5,
 };
+
+// analog comparator
+typedef struct {
+  volatile uint32_t ACMIS, ACRIS, ACINTEN, RESERVED1[1], ACREFCTL, RESERVED2[3],
+      ACSTAT0, ACCTL0, RESERVED3[6], ACSTAT1, ACCTL1, RESERVED4[990], ACMPPP;
+} ACMem;
+#define AC ((ACMem *)0x4003C000)
 
 static inline void spin(volatile uint32_t count) {
   while (count--)
@@ -150,14 +173,32 @@ static inline void setup_80mhz_pll_clock(void) {
   clear_bit(&SYSCTL->RCC2, 11);
 }
 
+static inline void enable_fpu(void) {
+  FPU->CPAC |= (0xF << 20); // enable both FPU coprocessors
+}
+
 static inline void gpio_set_mode(GPIOPin gpiopin, GPIOMode mode) {
-  RCGC->RCGCGPIO |= 1 << gpiopin.port; // ensure clock is enabled for GPIO port
+  set_bit(&RCGC->RCGCGPIO,
+          gpiopin.port); // ensure clock is enabled for GPIO port
   spin(3);
 
   GPIOMem *gpio = GPIO_PORTS[gpiopin.port];
-  gpio->GPIODIR &= ~((uint32_t)1 << gpiopin.pin);
-  gpio->GPIODIR |= mode << gpiopin.pin;
-  gpio->GPIODEN |= 1 << gpiopin.pin;
+
+  bool is_output =
+      (mode == GPIO_MODE_DIGITAL_OUTPUT) || (mode == GPIO_MODE_ANALOG_OUTPUT);
+  if (is_output) {
+    set_bit(&gpio->GPIODIR, gpiopin.pin);
+  } else {
+    clear_bit(&gpio->GPIODIR, gpiopin.pin);
+  }
+
+  bool is_digital =
+      (mode == GPIO_MODE_DIGITAL_INPUT) || (mode == GPIO_MODE_DIGITAL_OUTPUT);
+  if (is_digital) {
+    set_bit(&gpio->GPIODEN, gpiopin.pin);
+  } else {
+    clear_bit(&gpio->GPIODEN, gpiopin.pin);
+  }
 }
 
 static inline void gpio_set_pin(GPIOPin gpiopin, bool set) {
@@ -210,6 +251,27 @@ static inline void gpio_enable_af(GPIOPin gpiopin, uint8_t af) {
   gpio->GPIOPCTL |= af << (4 * gpiopin.pin);
 
   set_bit(&gpio->GPIODEN, gpiopin.pin); // make sure gpio pin is enabled
+
+  if (is_gpio_locked) {
+    gpio->GPIOCR = original_cr;
+    gpio->GPIOLOCK = 1;
+  }
+}
+
+static inline void gpio_enable_analog_function(GPIOPin gpiopin) {
+  GPIOMem *gpio = GPIO_PORTS[gpiopin.port];
+
+  bool is_gpio_locked = gpio->GPIOLOCK == 0x01 ? true : false;
+  uint32_t original_cr = gpio->GPIOCR;
+  if (is_gpio_locked) {
+    gpio->GPIOLOCK = GPIO_UNLOCK_VALUE;
+    set_bit(&gpio->GPIOCR, gpiopin.pin);
+  }
+  clear_bit(&gpio->GPIOAFSEL,
+            gpiopin.pin); // don't use digital alternate function
+
+  // put pin in analog mode
+  set_bit(&gpio->GPIOAMSEL, gpiopin.pin);
 
   if (is_gpio_locked) {
     gpio->GPIOCR = original_cr;
@@ -309,4 +371,9 @@ static inline void periodic_timer_init(uint8_t timer_num) {
 
 static inline uint32_t get_timer_value(GPTMMem *timer) {
   return timer->GPTMTAV; // value of the free-running timer
+}
+
+static inline uint32_t ticks_to_microseconds(uint32_t tick_count) {
+  const float seconds = (float)tick_count / (float)SYSTEM_CLOCK_FREQ_HZ;
+  return (uint32_t)(seconds * 1000000.f);
 }
