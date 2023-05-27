@@ -4,8 +4,13 @@
 
 #include "mcu.h"
 
+#define NUM_LOW_MEASUREMENTS (1000)
+
 static volatile uint32_t s_ticks;
 void SysTick_Handler(void) { s_ticks++; }
+
+static volatile uint32_t low_durations[NUM_LOW_MEASUREMENTS];
+static volatile uint32_t len_low_durations = 0;
 
 void comparator_count_low_handler(void) {
   static uint32_t start_ticks;
@@ -14,13 +19,24 @@ void comparator_count_low_handler(void) {
   const bool is_ac_inverted = get_bit(&AC->ACCTL1, 1);
   if (!is_ac_inverted) {
     start_ticks = current_ticks;
-    printf("Comparator went low at tick %lu\r\n", start_ticks);
     set_bit(&AC->ACCTL1, 1); // invert comparator output
   } else {
     uint32_t ticks_elapsed = current_ticks - start_ticks;
-    uint32_t millis_elapsed = ticks_to_microseconds(ticks_elapsed) / 1000;
-    printf("Comparator was low for %lu ms\r\n", millis_elapsed);
+    uint32_t micros_elapsed = ticks_to_microseconds(ticks_elapsed);
+    low_durations[len_low_durations++] = micros_elapsed;
     clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
+  }
+  if (len_low_durations == NUM_LOW_MEASUREMENTS) {
+    printf("Sync pulse lengths in us:\r\n");
+    for (int i=0; i < NUM_LOW_MEASUREMENTS; i++) {
+      printf("%lu, ", low_durations[i]);
+    }
+    printf("\r\n");
+    printf("\r\n");
+    len_low_durations = 0;
+
+    // disable the comparator interrupt
+    set_bit(&NVIC->DIS0, 26);
   }
 
   set_bit(&AC->ACMIS, 1); // clear the interrupt
