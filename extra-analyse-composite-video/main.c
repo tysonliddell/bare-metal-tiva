@@ -9,8 +9,27 @@
 static volatile uint32_t s_ticks;
 void SysTick_Handler(void) { s_ticks++; }
 
-static volatile uint32_t low_durations[NUM_LOW_MEASUREMENTS];
-static volatile uint32_t len_low_durations = 0;
+static volatile uint32_t pulse_durations[NUM_LOW_MEASUREMENTS];
+static volatile uint32_t pulse_occurred_at_tick[NUM_LOW_MEASUREMENTS];
+static volatile uint32_t pulse_count = 0;
+
+void print_results(void) {
+    printf("Sync pulse lengths:\r\n");
+    int i = 1;  // start at 1 so we can always compare to a previous pulse
+    while (pulse_durations[i] != 2) {
+      // skip to start of next frame (short-sync pulse is 2 µs)
+      i++;
+    }
+    // uint32_t first_pulse_tick = pulse_occurred_at_tick[i];
+    for (; i < NUM_LOW_MEASUREMENTS; i++) {
+      // uint32_t occurred_at = ticks_to_microseconds(pulse_occurred_at_tick[i] - first_pulse_tick);
+      // printf("len: %lu us, when: %lu us\r\n", pulse_durations[i], occurred_at);
+      uint32_t deltat = ticks_to_microseconds(pulse_occurred_at_tick[i] - pulse_occurred_at_tick[i-1]);
+      printf("len: %lu us, time since last pulse: %lu us\r\n", pulse_durations[i], deltat);
+    }
+    printf("\r\n");
+    printf("\r\n");
+}
 
 void comparator_count_low_handler(void) {
   static uint32_t start_ticks;
@@ -23,17 +42,14 @@ void comparator_count_low_handler(void) {
   } else {
     uint32_t ticks_elapsed = current_ticks - start_ticks;
     uint32_t micros_elapsed = ticks_to_microseconds(ticks_elapsed);
-    low_durations[len_low_durations++] = micros_elapsed;
+    pulse_occurred_at_tick[pulse_count] = current_ticks;
+    pulse_durations[pulse_count] = micros_elapsed;
+    pulse_count++;
     clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
   }
-  if (len_low_durations == NUM_LOW_MEASUREMENTS) {
-    printf("Sync pulse lengths in us:\r\n");
-    for (int i=0; i < NUM_LOW_MEASUREMENTS; i++) {
-      printf("%lu, ", low_durations[i]);
-    }
-    printf("\r\n");
-    printf("\r\n");
-    len_low_durations = 0;
+  if (pulse_count == NUM_LOW_MEASUREMENTS) {
+    print_results();
+    pulse_count = 0;
 
     // disable the comparator interrupt
     set_bit(&NVIC->DIS0, 26);
