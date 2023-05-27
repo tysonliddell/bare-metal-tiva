@@ -23,4 +23,4 @@ __attribute__((section(".vectors"))) void (*const tab[16 + 139])(void) = {
     [0] = _estack,
     [1] = _reset,
     [15] = SysTick_Handler,
-    [41] = comparator_count_low_handler};
+    [42] = comparator_count_low_handler};

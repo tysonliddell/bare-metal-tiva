@@ -11,34 +11,34 @@ void comparator_count_low_handler(void) {
   static uint32_t start_ticks;
 
   const uint32_t current_ticks = get_timer_value(TIMER0);
-  const bool is_ac_inverted = get_bit(&AC->ACCTL0, 1);
+  const bool is_ac_inverted = get_bit(&AC->ACCTL1, 1);
   if (!is_ac_inverted) {
     start_ticks = current_ticks;
     printf("Comparator went low at tick %lu\r\n", start_ticks);
-    set_bit(&AC->ACCTL0, 1); // invert comparator output
+    set_bit(&AC->ACCTL1, 1); // invert comparator output
   } else {
     uint32_t ticks_elapsed = current_ticks - start_ticks;
     uint32_t millis_elapsed = ticks_to_microseconds(ticks_elapsed) / 1000;
     printf("Comparator was low for %lu ms\r\n", millis_elapsed);
-    clear_bit(&AC->ACCTL0, 1); // uninvert comparator output
+    clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
   }
 
-  set_bit(&AC->ACMIS, 0); // clear the interrupt
+  set_bit(&AC->ACMIS, 1); // clear the interrupt
 }
 
 void setup_composite_video_experiment(void) {
   // Configure the analog comparator
-  gpio_set_mode(GPIO_PIN('C', 6), GPIO_MODE_ANALOG_INPUT);
-  gpio_set_mode(GPIO_PIN('C', 7), GPIO_MODE_ANALOG_INPUT);
-  gpio_enable_analog_function(GPIO_PIN('C', 6));
-  gpio_enable_analog_function(GPIO_PIN('C', 7));
+  gpio_set_mode(GPIO_PIN('C', 4), GPIO_MODE_ANALOG_INPUT);
+  gpio_set_mode(GPIO_PIN('C', 5), GPIO_MODE_ANALOG_INPUT);
+  gpio_enable_analog_function(GPIO_PIN('C', 4));
+  gpio_enable_analog_function(GPIO_PIN('C', 5));
 
   RCGC->RCGCACMP = 0x1; // give AC a clock
   spin(3);
   set_bit(
       &AC->ACINTEN,
-      0); // enable interrupt on AC0  (vector number 41, interrupt number 25)
-  set_bit(&NVIC->EN0, 25);
+      1); // enable interrupt on AC1  (vector number 42, interrupt number 26)
+  set_bit(&NVIC->EN0, 26);
 
   // set reference voltage to ~100 mV, assume any reading less than this is a
   // 0 V sync pulse.
@@ -48,12 +48,12 @@ void setup_composite_video_experiment(void) {
   AC->ACREFCTL &= ~0xFU; // set VREF to encoding 0x1 (149 mV)
   AC->ACREFCTL |= 0x1;
 
-  AC->ACCTL0 &= ~(0x3U << 9); // use internal reference voltage
-  AC->ACCTL0 |= (0x2 << 9);
+  AC->ACCTL1 &= ~(0x3U << 9); // use internal reference voltage
+  AC->ACCTL1 |= (0x2 << 9);
 
   // generate an interrupt when comparator output is high (sampled voltage is
   // low)
-  set_bit(&AC->ACCTL0, 4);
+  set_bit(&AC->ACCTL1, 4);
 }
 
 int main(void) {
