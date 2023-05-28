@@ -121,6 +121,37 @@ typedef struct {
 } ACMem;
 #define AC ((ACMem *)0x4003C000)
 
+typedef struct {
+  volatile uint32_t ADCACTSS, ADCRIS, ADCIM, ADCISC, ADCOSTAT, ADCEMUX,
+      ADCUSTAT, ADCTSSEL, ADCSSPRI, ADCSPC, ADCPSSI, RESERVED1[1], ADCSAC,
+      ADCDCISC, ADCCTL, RESERVED2[1], ADCSSMUX0, ADCSSCTL0, ADCSSFIFO0,
+      ADCSSFSTAT0, ADCSSOP0, ADCSSDC0, RESERVED3[2], ADCSSMUX1, ADCSSCTL1,
+      ADCSSFIFO1, ADCSSFSTAT1, ADCSSOP1, ADCSSDC1, RESERVED4[2], ADCSSMUX2,
+      ADCSSCTL2, ADCSSFIFO2, ADCSSFSTAT2, ADCSSOP2, ADCSSDC2, RESERVED5[2],
+      ADCSSMUX3, ADCSSCTL3, ADCSSFIFO3, ADCSSFSTAT3, ADCSSOP3, ADCSSDC3,
+      RESERVED6[786], ADCDCRIC, RESERVED7[63], ADCDCCTL0, ADCDCCTL1, ADCDCCTL2,
+      ADCDCCTL3, ADCDCCTL4, ADCDCCTL5, ADCDCCTL6, ADCDCCTL7, RESERVED8[8],
+      ADCDCCMP0, ADCDCCMP1, ADCDCCMP2, ADCDCCMP3, ADCDCCMP4, ADCDCCMP5,
+      ADCDCCMP6, ADCDCCMP7, RESERVED9[88], ADCPP, ADCPC, ADCCC;
+} ADCMem;
+#define ADC0 ((ADCMem *)0x40038000)
+#define ADC1 ((ADCMem *)0x40039000)
+
+typedef struct {
+  volatile uint32_t DMASRCENDP, DMADSTENDP, DMACHCTL;
+} DMAContolStructureMem;
+
+typedef struct {
+  volatile uint32_t DMASTAT, DMACFG, DMACTLBASE, DMAALTBASE, DMAWAITSTAT,
+      DMASWREQ, DMAUSEBURSTSET, DMAUSEBURSTCLR, DMAREQMASKSET, DMAREQMASKCLR,
+      DMAENASET, DMAENACLR, DMAALTSET, DMAALTCLR, DMAPRIOSET, DMAPRIOCLR,
+      RESERVED1[3], DMAERRCLR, RESERVED2[300], DMACHASGN, DMACHIS, RESERVED3[2],
+      DMACHMAP0, DMACHMAP1, DMACHMAP2, DMACHMAP3, RESERVED4[684], DMAPeriphID4,
+      RESERVED5[3], DMAPeriphID0, DMAPeriphID1, DMAPeriphID2, DMAPeriphID3,
+      DMAPCellID0, DMAPCellID1, DMAPCellID2, DMAPCellID3;
+} DMAMem;
+#define DMA ((DMAMem *)0x400FF000)
+
 static inline void spin(volatile uint32_t count) {
   while (count--)
     (void)0;
@@ -267,8 +298,7 @@ static inline void gpio_enable_analog_function(GPIOPin gpiopin) {
     gpio->GPIOLOCK = GPIO_UNLOCK_VALUE;
     set_bit(&gpio->GPIOCR, gpiopin.pin);
   }
-  clear_bit(&gpio->GPIOAFSEL,
-            gpiopin.pin); // don't use digital alternate function
+  set_bit(&gpio->GPIOAFSEL, gpiopin.pin); // use alternate function
 
   // put pin in analog mode
   set_bit(&gpio->GPIOAMSEL, gpiopin.pin);
@@ -376,4 +406,9 @@ static inline uint32_t get_timer_value(GPTMMem *timer) {
 static inline uint32_t ticks_to_microseconds(uint32_t tick_count) {
   const float seconds = (float)tick_count / (float)SYSTEM_CLOCK_FREQ_HZ;
   return (uint32_t)(seconds * 1000000.f);
+}
+
+static inline uint32_t microseconds_to_ticks(uint32_t microseconds) {
+  const float seconds = (float)microseconds / 1000000.f;
+  return (uint32_t)(seconds * (float)SYSTEM_CLOCK_FREQ_HZ);
 }

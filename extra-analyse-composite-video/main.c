@@ -4,35 +4,75 @@
 
 #include "mcu.h"
 
-#define NUM_LOW_MEASUREMENTS (1000)
+#define MAX_VIDEO_SAMPLES (30000) // allows 30 per scanline and 1000 scanlines
+#define H_SYNC_PULSE_DURATION_MICROSECONDS (4)
+#define LONG_SYNC_PULSE_DURATION_MICROSECONDS (27)
+#define ACTIVE_VIDEO_DURATION_MICROSECONDS                                     \
+  (52 - 5) // TODO: as close to 52 as possible
 
 static volatile uint32_t s_ticks;
 void SysTick_Handler(void) { s_ticks++; }
 
-static volatile uint32_t pulse_durations[NUM_LOW_MEASUREMENTS];
-static volatile uint32_t pulse_occurred_at_tick[NUM_LOW_MEASUREMENTS];
-static volatile uint32_t pulse_count = 0;
+static uint8_t video_samples[MAX_VIDEO_SAMPLES];
+static uint32_t active_video_sample_count = 0;
 
-void print_results(void) {
-    printf("Sync pulse lengths:\r\n");
-    int i = 1;  // start at 1 so we can always compare to a previous pulse
-    while (pulse_durations[i] != 2) {
-      // skip to start of next frame (short-sync pulse is 2 µs)
-      i++;
+void print_field_results(void) {
+  printf("FIELD SAMPLES\r\n");
+  for (uint32_t i = 0; i < active_video_sample_count; i++) {
+    printf("%u, ", video_samples[i]);
+  }
+  printf("\r\n");
+  printf("\r\n");
+}
+
+static inline bool is_long_sync_pulse_duration(uint32_t duration_microseconds) {
+  return duration_microseconds >= LONG_SYNC_PULSE_DURATION_MICROSECONDS - 2 &&
+         duration_microseconds <= LONG_SYNC_PULSE_DURATION_MICROSECONDS + 2;
+}
+
+static inline bool is_hsync_duration(uint32_t duration_microseconds) {
+  return duration_microseconds >= H_SYNC_PULSE_DURATION_MICROSECONDS &&
+         duration_microseconds <= H_SYNC_PULSE_DURATION_MICROSECONDS + 1;
+}
+
+static inline uint8_t normalise_and_truncate_12bit_sample(uint32_t sample) {
+  uint32_t scaled_sample =
+      (uint32_t)((float)sample * 3.3f); // supply voltage is 3.3v, but scanline is limited to 1v
+  return (uint8_t)(scaled_sample >> 4);
+}
+
+void capture_scanline(uint32_t duration_microseconds) {
+  const uint32_t start_ticks = get_timer_value(TIMER0);
+  const uint32_t end_ticks =
+      start_ticks + microseconds_to_ticks(duration_microseconds);
+  uint32_t sample_count = 0;
+
+  // sample ADC with naive approach that doesn't use DMA.
+  set_bit(&ADC0->ADCACTSS, 3); // start SS3 ready for (continuous) sampling
+
+  while (get_timer_value(TIMER0) < end_ticks && sample_count < 60) {
+    while (get_bit(&ADC0->ADCSSFSTAT3, 8)) {
+      // wait for ADC buffer to be non-empty
+      (void)0;
     }
-    // uint32_t first_pulse_tick = pulse_occurred_at_tick[i];
-    for (; i < NUM_LOW_MEASUREMENTS; i++) {
-      // uint32_t occurred_at = ticks_to_microseconds(pulse_occurred_at_tick[i] - first_pulse_tick);
-      // printf("len: %lu us, when: %lu us\r\n", pulse_durations[i], occurred_at);
-      uint32_t deltat = ticks_to_microseconds(pulse_occurred_at_tick[i] - pulse_occurred_at_tick[i-1]);
-      printf("len: %lu us, time since last pulse: %lu us\r\n", pulse_durations[i], deltat);
-    }
-    printf("\r\n");
-    printf("\r\n");
+    uint32_t sample = ADC0->ADCSSFIFO3; // save recorded sample
+    video_samples[active_video_sample_count++] =
+        normalise_and_truncate_12bit_sample(sample);
+    sample_count++;
+  }
+
+  clear_bit(&ADC0->ADCACTSS, 3); // end SS3 sampling and clear stack
+  if (!get_bit(&ADC0->ADCSSFSTAT3, 8)) {
+    uint32_t sample = ADC0->ADCSSFIFO3;
+    video_samples[active_video_sample_count++] =
+        normalise_and_truncate_12bit_sample(sample);
+  }
+  video_samples[active_video_sample_count++] = 0; // 0 marks end of scanline
 }
 
 void comparator_count_low_handler(void) {
   static uint32_t start_ticks;
+  static bool capture_scanlines = false;
 
   const uint32_t current_ticks = get_timer_value(TIMER0);
   const bool is_ac_inverted = get_bit(&AC->ACCTL1, 1);
@@ -40,32 +80,38 @@ void comparator_count_low_handler(void) {
     start_ticks = current_ticks;
     set_bit(&AC->ACCTL1, 1); // invert comparator output
   } else {
-    uint32_t ticks_elapsed = current_ticks - start_ticks;
-    uint32_t micros_elapsed = ticks_to_microseconds(ticks_elapsed);
-    pulse_occurred_at_tick[pulse_count] = current_ticks;
-    pulse_durations[pulse_count] = micros_elapsed;
-    pulse_count++;
-    clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
-  }
-  if (pulse_count == NUM_LOW_MEASUREMENTS) {
-    print_results();
-    pulse_count = 0;
+    const uint32_t ticks_elapsed = current_ticks - start_ticks;
+    const uint32_t micros_elapsed = ticks_to_microseconds(ticks_elapsed);
+    if (is_long_sync_pulse_duration(micros_elapsed)) {
+      if (active_video_sample_count > 0) {
+        capture_scanlines = false; // already captured one field
+        print_field_results();
+        active_video_sample_count = 0;
 
-    // disable the comparator interrupt
-    set_bit(&NVIC->DIS0, 26);
+        // disable the comparator interrupt
+        set_bit(&NVIC->DIS0, 26);
+      } else {
+        capture_scanlines = true;
+      }
+    } else if (is_hsync_duration(micros_elapsed)) {
+      if (capture_scanlines) {
+        capture_scanline(ACTIVE_VIDEO_DURATION_MICROSECONDS);
+      }
+    }
+    clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
   }
 
   set_bit(&AC->ACMIS, 1); // clear the interrupt
 }
 
 void setup_composite_video_experiment(void) {
-  // Configure the analog comparator
+  // CONFIGURE ANALOG COMPARATOR (used for sync timing)
   gpio_set_mode(GPIO_PIN('C', 4), GPIO_MODE_ANALOG_INPUT);
   gpio_set_mode(GPIO_PIN('C', 5), GPIO_MODE_ANALOG_INPUT);
   gpio_enable_analog_function(GPIO_PIN('C', 4));
   gpio_enable_analog_function(GPIO_PIN('C', 5));
 
-  RCGC->RCGCACMP = 0x1; // give AC a clock
+  set_bit(&RCGC->RCGCACMP, 0); // give AC module a clock
   spin(3);
   set_bit(
       &AC->ACINTEN,
@@ -86,6 +132,22 @@ void setup_composite_video_experiment(void) {
   // generate an interrupt when comparator output is high (sampled voltage is
   // low)
   set_bit(&AC->ACCTL1, 4);
+
+  // CONFIGURE ADC (used to measure the active video signal)
+  gpio_set_mode(GPIO_PIN('E', 3), GPIO_MODE_ANALOG_INPUT);
+  gpio_enable_analog_function(GPIO_PIN('E', 3));
+
+  set_bit(&RCGC->RCGCADC, 0); // give ADC0 module a clock
+  spin(3);
+
+  clear_bit(&ADC0->ADCACTSS, 3); // disable SS3 before configuring
+  ADC0->ADCEMUX |= (0xF << 12);  // set SS3 to continuously sample
+  ADC0->ADCSSMUX3 = 0x0;         // set SS3 to take samples from AIN0
+
+  // configure the SS3 sample sequence
+  ADC0->ADCSSCTL3 = 0x0;
+  set_bit(&ADC0->ADCSSCTL0, 1); // sequence ends after one sample, no
+                                // interrupts, no differential sampling
 }
 
 int main(void) {
@@ -107,9 +169,6 @@ int main(void) {
     if (timer_expired(&timer_expiry, period_ms, s_ticks)) {
       led_is_on = !led_is_on;
       gpio_set_pin(GPIO_PIN('F', led_pin), led_is_on);
-      // printf("LED_STATE: %d, tick: %lu\r\n", led_is_on, s_ticks);
-      // printf("TIMER: %lu\r\n", get_timer_value(TIMER0));
-      // printf("COMPARATOR: %lu\r\n", AC->ACSTAT0);
     }
   }
   return 0;
