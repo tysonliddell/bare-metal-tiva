@@ -128,9 +128,9 @@ void comparator_count_low_handler(void) {
 void setup_composite_video_experiment(void) {
   // CONFIGURE ANALOG COMPARATOR (used for sync timing)
   gpio_set_mode(GPIO_PIN('C', 4), GPIO_MODE_ANALOG_INPUT);
-  gpio_set_mode(GPIO_PIN('C', 5), GPIO_MODE_ANALOG_INPUT);
+  // gpio_set_mode(GPIO_PIN('C', 5), GPIO_MODE_ANALOG_INPUT);
   gpio_enable_analog_function(GPIO_PIN('C', 4));
-  gpio_enable_analog_function(GPIO_PIN('C', 5));
+  // gpio_enable_analog_function(GPIO_PIN('C', 5));
 
   set_bit(&RCGC->RCGCACMP, 0); // give AC module a clock
   spin(3);
