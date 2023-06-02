@@ -10,6 +10,14 @@
 #define ACTIVE_VIDEO_DURATION_MICROSECONDS                                     \
   (52 - 5) // TODO: as close to 52 as possible
 
+#define ADC_MIN_uVOLTS (0)
+#define ADC_MAX_uVOLTS (3300000)
+#define ADC_NUM_DISCRETE_SAMPLES (0x1000)
+#define ADC_SAMPLE_DELTA_uV ((ADC_MAX_uVOLTS - ADC_MIN_uVOLTS) / (ADC_NUM_DISCRETE_SAMPLES))
+#define ADC_SAMPLE_300mV ((300000 - ADC_MIN_uVOLTS) / ADC_SAMPLE_DELTA_uV)
+#define ADC_SAMPLE_700mV ((700000 - ADC_MIN_uVOLTS) / ADC_SAMPLE_DELTA_uV)
+#define ADC_SAMPLE_MAX (0xFFF)
+
 static volatile uint32_t s_ticks;
 void SysTick_Handler(void) { s_ticks++; }
 
@@ -36,9 +44,22 @@ static inline bool is_hsync_duration(uint32_t duration_microseconds) {
 }
 
 static inline uint8_t normalise_and_truncate_12bit_sample(uint32_t sample) {
-  uint32_t scaled_sample =
-      (uint32_t)((float)sample * 3.3f); // supply voltage is 3.3v, but scanline is limited to 1v
-  return (uint8_t)(scaled_sample >> 4);
+  int32_t signed_sample =
+      (int32_t)sample; // this is safe since sample is in range [0x0, 0xFFF]
+
+  // linearly map 300mV samples to 0x0 and 1000mV samples to 0xFFF.
+  int32_t normalised_sample =
+      (signed_sample - ADC_SAMPLE_300mV) * (ADC_SAMPLE_MAX / ADC_SAMPLE_700mV);
+
+  // clamp sample to range [0x0, 0xFFF] ([300mV, 1000mV] in volts)
+  if (normalised_sample < 0) {
+    normalised_sample = 0;
+  } else if (normalised_sample > ADC_SAMPLE_MAX) {
+    normalised_sample = ADC_SAMPLE_MAX;
+  }
+
+  // truncate to 8-bits
+  return (uint8_t)(normalised_sample >> 4);
 }
 
 void capture_scanline(uint32_t duration_microseconds) {
