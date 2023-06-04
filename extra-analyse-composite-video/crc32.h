@@ -42,7 +42,6 @@
 
 #define POLYNOMIAL_CRC32C (0x1EDC6F41)
 #define POLYNOMIAL_CRC32C_REVERSED (0x82F63B78)
-
 #define POLYNOMIAL_CRC32K_6_4 (0x32C00699)
 #define POLYNOMIAL_CRC32K_6_4_REVERSED (0x9960034C)
 
@@ -50,14 +49,14 @@
  * Compute a 32-bit CRC checksum for data to be sent one byte at a time, least
  * significant bit first (UART).
  */
-uint32_t crc32c_lsb_first(uint8_t *buffer, size_t buffer_size) {
+uint32_t crc32k_lsb_first(uint8_t *buffer, size_t buffer_size) {
   uint32_t rem = 0xFFFFFFFF;
 
   for (size_t i = 0; i < buffer_size; i++) {
     rem ^= buffer[i];
     for (int j = 0; j < 8; j++) {
       if (rem & 0x00000001) {
-        rem = (rem >> 1) ^ POLYNOMIAL_CRC32C_REVERSED;
+        rem = (rem >> 1) ^ POLYNOMIAL_CRC32K_6_4_REVERSED;
       } else {
         rem >>= 1;
       }
