@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "led.h"
 #include "mcu.h"
 
 #define MAX_VIDEO_SAMPLES (30000) // allows 30 per scanline and 1000 scanlines
@@ -128,9 +129,7 @@ void comparator_count_low_handler(void) {
 void setup_composite_video_experiment(void) {
   // CONFIGURE ANALOG COMPARATOR (used for sync timing)
   gpio_set_mode(GPIO_PIN('C', 4), GPIO_MODE_ANALOG_INPUT);
-  // gpio_set_mode(GPIO_PIN('C', 5), GPIO_MODE_ANALOG_INPUT);
   gpio_enable_analog_function(GPIO_PIN('C', 4));
-  // gpio_enable_analog_function(GPIO_PIN('C', 5));
 
   set_bit(&RCGC->RCGCACMP, 0); // give AC module a clock
   spin(3);
@@ -177,19 +176,16 @@ int main(void) {
   periodic_timer_init(0);
   enable_fpu();
   uart_init(0, 115200); // io retargeting sends printf to UART0
+  enable_leds();
 
   setup_composite_video_experiment();
-
-  // setup debug LED
-  uint8_t led_pin = 1;
-  gpio_set_mode(GPIO_PIN('F', led_pin), GPIO_MODE_DIGITAL_OUTPUT);
 
   uint32_t timer_expiry = 0, period_ms = 500;
   bool led_is_on = false;
   for (;;) {
     if (timer_expired(&timer_expiry, period_ms, s_ticks)) {
       led_is_on = !led_is_on;
-      gpio_set_pin(GPIO_PIN('F', led_pin), led_is_on);
+      led_is_on ? set_led_state(LED_STATE_RED) : set_led_state(LED_STATE_OFF);
     }
   }
   return 0;
