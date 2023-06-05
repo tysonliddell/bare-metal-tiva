@@ -4,7 +4,7 @@ CFLAGS := -W -Wall -Wextra -Werror -Wundef -Wshadow -Wdouble-promotion \
             -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 $(EXTRA_CFLAGS)
 LINKERSCRIPT := link.ld
 LDFLAGS := -T$(LINKERSCRIPT) -nostartfiles -nostdlib --specs nano.specs -lc -lgcc -Wl,--gc-sections -Wl,-Map=$@.map
-SOURCES := main.c startup.c syscalls.c led.c
+SOURCES := main.c startup.c syscalls.c led.c xmodem.c
 
 .PHONY: build
 build: firmware.elf

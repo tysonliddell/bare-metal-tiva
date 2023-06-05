@@ -1,11 +1,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "led.h"
 #include "mcu.h"
+#include "xmodem.h"
 
 #define MAX_VIDEO_SAMPLES (30000) // allows 30 per scanline and 1000 scanlines
+#define MAX_NUM_SCANLINES (1000)
+#define NUM_SAMPLES_PER_SCANLINE (30)
 #define H_SYNC_PULSE_DURATION_MICROSECONDS (4)
 #define LONG_SYNC_PULSE_DURATION_MICROSECONDS (27)
 #define ACTIVE_VIDEO_DURATION_MICROSECONDS                                     \
@@ -14,7 +18,8 @@
 #define ADC_MIN_uVOLTS (0)
 #define ADC_MAX_uVOLTS (3300000)
 #define ADC_NUM_DISCRETE_SAMPLES (0x1000)
-#define ADC_SAMPLE_DELTA_uV ((ADC_MAX_uVOLTS - ADC_MIN_uVOLTS) / (ADC_NUM_DISCRETE_SAMPLES))
+#define ADC_SAMPLE_DELTA_uV                                                    \
+  ((ADC_MAX_uVOLTS - ADC_MIN_uVOLTS) / (ADC_NUM_DISCRETE_SAMPLES))
 #define ADC_SAMPLE_300mV ((300000 - ADC_MIN_uVOLTS) / ADC_SAMPLE_DELTA_uV)
 #define ADC_SAMPLE_700mV ((700000 - ADC_MIN_uVOLTS) / ADC_SAMPLE_DELTA_uV)
 #define ADC_SAMPLE_MAX (0xFFF)
@@ -22,16 +27,12 @@
 static volatile uint32_t s_ticks;
 void SysTick_Handler(void) { s_ticks++; }
 
-static uint8_t video_samples[MAX_VIDEO_SAMPLES];
-static uint32_t active_video_sample_count = 0;
+static uint8_t scanline_samples[MAX_NUM_SCANLINES][NUM_SAMPLES_PER_SCANLINE];
+static uint32_t scanline_count = 0;
 
-void print_field_results(void) {
-  printf("FIELD SAMPLES\r\n");
-  for (uint32_t i = 0; i < active_video_sample_count; i++) {
-    printf("%u, ", video_samples[i]);
-  }
-  printf("\r\n");
-  printf("\r\n");
+void send_field_results(void) {
+  xmodem_wait_and_send((uint8_t *)scanline_samples,
+                       scanline_count * NUM_SAMPLES_PER_SCANLINE);
 }
 
 static inline bool is_long_sync_pulse_duration(uint32_t duration_microseconds) {
@@ -72,24 +73,26 @@ void capture_scanline(uint32_t duration_microseconds) {
   // sample ADC with naive approach that doesn't use DMA.
   set_bit(&ADC0->ADCACTSS, 3); // start SS3 ready for (continuous) sampling
 
-  while (get_timer_value(TIMER0) < end_ticks && sample_count < 60) {
+  while (get_timer_value(TIMER0) < end_ticks &&
+         sample_count < NUM_SAMPLES_PER_SCANLINE) {
     while (get_bit(&ADC0->ADCSSFSTAT3, 8)) {
       // wait for ADC buffer to be non-empty
       (void)0;
     }
     uint32_t sample = ADC0->ADCSSFIFO3; // save recorded sample
-    video_samples[active_video_sample_count++] =
+    scanline_samples[scanline_count][sample_count++] =
         normalise_and_truncate_12bit_sample(sample);
-    sample_count++;
   }
 
   clear_bit(&ADC0->ADCACTSS, 3); // end SS3 sampling and clear stack
-  if (!get_bit(&ADC0->ADCSSFSTAT3, 8)) {
+  if (!get_bit(&ADC0->ADCSSFSTAT3, 8) &&
+      sample_count < NUM_SAMPLES_PER_SCANLINE) {
     uint32_t sample = ADC0->ADCSSFIFO3;
-    video_samples[active_video_sample_count++] =
+    scanline_samples[scanline_count][sample_count++] =
         normalise_and_truncate_12bit_sample(sample);
   }
-  video_samples[active_video_sample_count++] = 0; // 0 marks end of scanline
+
+  scanline_count++;
 }
 
 void comparator_count_low_handler(void) {
@@ -105,10 +108,10 @@ void comparator_count_low_handler(void) {
     const uint32_t ticks_elapsed = current_ticks - start_ticks;
     const uint32_t micros_elapsed = ticks_to_microseconds(ticks_elapsed);
     if (is_long_sync_pulse_duration(micros_elapsed)) {
-      if (active_video_sample_count > 0) {
+      if (scanline_count > 0) {
         capture_scanlines = false; // already captured one field
-        print_field_results();
-        active_video_sample_count = 0;
+        send_field_results();
+        scanline_count = 0;
 
         // disable the comparator interrupt
         set_bit(&NVIC->DIS0, 26);
