@@ -278,7 +278,7 @@ static inline void gpio_enable_af(GPIOPin gpiopin, uint8_t af) {
   set_bit(&gpio->GPIOAFSEL, gpiopin.pin); // use alternate function
 
   // select alternate function
-  gpio->GPIOPCTL &= ~(0xFUL) << (4 * gpiopin.pin);
+  gpio->GPIOPCTL &= ~(0xFUL << 4 * gpiopin.pin);
   gpio->GPIOPCTL |= af << (4 * gpiopin.pin);
 
   set_bit(&gpio->GPIODEN, gpiopin.pin); // make sure gpio pin is enabled
