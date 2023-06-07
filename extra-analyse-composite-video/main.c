@@ -7,8 +7,7 @@
 #include "mcu.h"
 #include "xmodem.h"
 
-#define MAX_VIDEO_SAMPLES (30000) // allows 30 per scanline and 1000 scanlines
-#define MAX_NUM_SCANLINES (1000)
+#define MAX_NUM_SCANLINES (500)
 #define NUM_SAMPLES_PER_SCANLINE (30)
 #define H_SYNC_PULSE_DURATION_MICROSECONDS (4)
 #define LONG_SYNC_PULSE_DURATION_MICROSECONDS (27)

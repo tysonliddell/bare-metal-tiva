@@ -2,12 +2,10 @@
  * An minimal implementation of the XMODEM protocol to send data from the MCU to
  * a receiver. Probably overkill, but uses a 32-bit checksum.
  */
-#include <machine/endian.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
 
-#include "crc32.h"
 #include "led.h"
 #include "mcu.h"
 #include "xmodem.h"
@@ -21,7 +19,7 @@
 #define SOH_SIZE (1)
 #define BLOCK_COUNTER_SIZE (2)
 #define BLOCK_SIZE (128)
-#define CHECKSUM_SIZE (4)
+#define CHECKSUM_SIZE (1)
 #define HEADER_SIZE (SOH_SIZE + BLOCK_COUNTER_SIZE)
 #define PACKET_SIZE (HEADER_SIZE + BLOCK_SIZE + CHECKSUM_SIZE)
 
@@ -38,7 +36,7 @@ static bool wait_for_byte(const uint8_t expected_byte);
 
 /*
  * Listen for a NAK from the receiver and then send a stream of data on UART
- * using XMODEM protocol with 32-bit CRC.
+ * using XMODEM protocol.
  */
 void xmodem_wait_and_send(const uint8_t *data, const size_t len) {
   set_led_state(LED_STATE_YELLOW);
@@ -86,7 +84,7 @@ static bool send_block(const uint8_t *data, const size_t len,
 
   // headers
   packet[0] = SOH;
-  packet[1] = packet_num;
+  packet[1] = packet_num + 1;   // packets are 1-indexed by protocol
   packet[2] = 255 - packet[1];
 
   const size_t start_byte_idx = packet_num * BLOCK_SIZE;
@@ -97,12 +95,14 @@ static bool send_block(const uint8_t *data, const size_t len,
   memset(&packet[HEADER_SIZE], PADDING, BLOCK_SIZE);
   memcpy(&packet[HEADER_SIZE], &data[start_byte_idx], data_payload_size);
 
-  // checksum, stored in packet in network byte order
-  const uint32_t crc =
-      __htonl(crc32k_lsb_first(packet, PACKET_SIZE - CHECKSUM_SIZE));
-  memcpy(&packet[PACKET_SIZE - CHECKSUM_SIZE], &crc, CHECKSUM_SIZE);
+  uint8_t checksum = 0;
+  for (int i=0; i < BLOCK_SIZE; i++) {
+    checksum += packet[HEADER_SIZE + i];
+  }
 
-  return send_bytes(packet, len, NUM_TX_RETRIES);
+  memcpy(&packet[PACKET_SIZE - CHECKSUM_SIZE], &checksum, CHECKSUM_SIZE);
+
+  return send_bytes(packet, PACKET_SIZE, NUM_TX_RETRIES);
 }
 
 /*
