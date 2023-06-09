@@ -84,11 +84,12 @@ void capture_scanline(uint32_t duration_microseconds) {
   }
 
   clear_bit(&ADC0->ADCACTSS, 3); // end SS3 sampling and clear stack
-  if (!get_bit(&ADC0->ADCSSFSTAT3, 8) &&
-      sample_count < NUM_SAMPLES_PER_SCANLINE) {
+  if (!get_bit(&ADC0->ADCSSFSTAT3, 8)) {
     uint32_t sample = ADC0->ADCSSFIFO3;
-    scanline_samples[scanline_count][sample_count++] =
-        normalise_and_truncate_12bit_sample(sample);
+    if (sample_count < NUM_SAMPLES_PER_SCANLINE) {
+      scanline_samples[scanline_count][sample_count++] =
+          normalise_and_truncate_12bit_sample(sample);
+    }
   }
 
   scanline_count++;
