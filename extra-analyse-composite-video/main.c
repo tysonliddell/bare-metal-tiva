@@ -63,18 +63,27 @@ static inline uint8_t normalise_and_truncate_12bit_sample(uint32_t sample) {
   return (uint8_t)(normalised_sample >> 4);
 }
 
+static inline bool is_adc_fifo_empty(void) {
+  return get_bit(&ADC0->ADCSSFSTAT3, 8);
+}
+
 void capture_scanline(uint32_t duration_microseconds) {
   const uint32_t start_ticks = get_timer_value(TIMER0);
   const uint32_t end_ticks =
       start_ticks + microseconds_to_ticks(duration_microseconds);
   uint32_t sample_count = 0;
 
-  // sample ADC with naive approach that doesn't use DMA.
+  // Clear FIFO before sampling. Might have data from previous scanline.
+  if (!is_adc_fifo_empty()) {
+    ADC0->ADCSSFIFO3;
+  }
+
   set_bit(&ADC0->ADCACTSS, 3); // start SS3 ready for (continuous) sampling
+  set_bit(&ADC0->ADCPSSI, 3);  // begin sampling
 
   while (get_timer_value(TIMER0) < end_ticks &&
          sample_count < NUM_SAMPLES_PER_SCANLINE) {
-    while (get_bit(&ADC0->ADCSSFSTAT3, 8)) {
+    while (is_adc_fifo_empty()) {
       // wait for ADC buffer to be non-empty
       (void)0;
     }
@@ -83,15 +92,7 @@ void capture_scanline(uint32_t duration_microseconds) {
         normalise_and_truncate_12bit_sample(sample);
   }
 
-  clear_bit(&ADC0->ADCACTSS, 3); // end SS3 sampling and clear stack
-  if (!get_bit(&ADC0->ADCSSFSTAT3, 8)) {
-    uint32_t sample = ADC0->ADCSSFIFO3;
-    if (sample_count < NUM_SAMPLES_PER_SCANLINE) {
-      scanline_samples[scanline_count][sample_count++] =
-          normalise_and_truncate_12bit_sample(sample);
-    }
-  }
-
+  clear_bit(&ADC0->ADCACTSS, 3); // end SS3 sampling
   scanline_count++;
 }
 
