@@ -44,6 +44,7 @@
 #define POLYNOMIAL_CRC32C_REVERSED (0x82F63B78)
 #define POLYNOMIAL_CRC32K_6_4 (0x32C00699)
 #define POLYNOMIAL_CRC32K_6_4_REVERSED (0x9960034C)
+#define POLYNOMIAL_CRC16_CCITT (0x1021)
 
 /*
  * Compute a 32-bit CRC checksum for data to be sent one byte at a time, least
@@ -64,4 +65,26 @@ uint32_t crc32k_lsb_first(uint8_t *buffer, size_t buffer_size) {
   }
 
   return rem ^ 0xFFFFFFFF;
+}
+
+/*
+ * Compute a 16-bit CRC checksum for xmodem:
+ *   width=16 poly=0x1021 init=0x0000 refin=false refout=false xorout=0x0000
+ *   check=0x31c3 residue=0x0000 name="CRC-16/XMODEM"
+ */
+uint16_t crc16_xmodem(uint8_t *buffer, size_t buffer_size) {
+  uint16_t rem = 0x0;
+
+  for (size_t i = 0; i < buffer_size; i++) {
+    rem ^= (buffer[i] << (16 - 8));
+    for (int j = 0; j < 8; j++) {
+      if (rem & 0x8000) {
+        rem = (rem << 1) ^ POLYNOMIAL_CRC16_CCITT;
+      } else {
+        rem <<= 1;
+      }
+    }
+  }
+
+  return rem;
 }
