@@ -7,12 +7,13 @@
 #include "mcu.h"
 #include "xmodem.h"
 
-#define MAX_NUM_SCANLINES (500)
-#define NUM_SAMPLES_PER_SCANLINE (30)
+#define UART_BAUD_RATE (1500000)
+#define MAX_NUM_SCANLINES (400)
+#define NUM_SAMPLES_PER_SCANLINE (60)
 #define H_SYNC_PULSE_DURATION_MICROSECONDS (4)
 #define LONG_SYNC_PULSE_DURATION_MICROSECONDS (27)
-#define ACTIVE_VIDEO_DURATION_MICROSECONDS                                     \
-  (52 - 5) // TODO: as close to 52 as possible
+#define BACK_PORCH_DURATION_MICROSECONDS (6)
+#define ACTIVE_VIDEO_DURATION_MICROSECONDS (50)
 
 #define ADC_MIN_uVOLTS (0)
 #define ADC_MAX_uVOLTS (3300000)
@@ -69,8 +70,7 @@ static inline bool is_adc_fifo_empty(void) {
 
 void capture_scanline(uint32_t duration_microseconds) {
   const uint32_t start_ticks = get_timer_value(TIMER0);
-  const uint32_t end_ticks =
-      start_ticks + microseconds_to_ticks(duration_microseconds);
+  const uint32_t duration_ticks = microseconds_to_ticks(duration_microseconds);
   uint32_t sample_count = 0;
 
   // Clear FIFO before sampling. Might have data from previous scanline.
@@ -81,7 +81,7 @@ void capture_scanline(uint32_t duration_microseconds) {
   set_bit(&ADC0->ADCACTSS, 3); // start SS3 ready for (continuous) sampling
   set_bit(&ADC0->ADCPSSI, 3);  // begin sampling
 
-  while (get_timer_value(TIMER0) < end_ticks &&
+  while (get_timer_value(TIMER0) - start_ticks < duration_ticks &&
          sample_count < NUM_SAMPLES_PER_SCANLINE) {
     while (is_adc_fifo_empty()) {
       // wait for ADC buffer to be non-empty
@@ -113,15 +113,13 @@ void comparator_count_low_handler(void) {
         capture_scanlines = false; // already captured one field
         send_field_results();
         scanline_count = 0;
-
-        // disable the comparator interrupt
-        set_bit(&NVIC->DIS0, 26);
       } else {
         capture_scanlines = true;
       }
     } else if (is_hsync_duration(micros_elapsed)) {
       if (capture_scanlines) {
-        capture_scanline(ACTIVE_VIDEO_DURATION_MICROSECONDS);
+        capture_scanline(BACK_PORCH_DURATION_MICROSECONDS +
+                         ACTIVE_VIDEO_DURATION_MICROSECONDS);
       }
     }
     clear_bit(&AC->ACCTL1, 1); // uninvert comparator output
@@ -179,7 +177,7 @@ int main(void) {
   systick_init();
   periodic_timer_init(0);
   enable_fpu();
-  uart_init(0, 115200); // io retargeting sends printf to UART0
+  uart_init(0, UART_BAUD_RATE); // io retargeting sends printf to UART0
   enable_leds();
 
   setup_composite_video_experiment();
